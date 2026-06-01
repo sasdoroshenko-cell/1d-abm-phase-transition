@@ -1,0 +1,35 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- IDE / editor ----
+.idea/
+.vscode/
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+
+# ---- Generated experiment artefacts ----
+# Results (CSV) are produced by running the experiments; not tracked.
+results/**/*.csv
+results/*.csv
+*.csv
+
+# Figures are rendered at runtime (plt.show); if you save them, keep them out of git:
+results/**/*.png
+*.png
