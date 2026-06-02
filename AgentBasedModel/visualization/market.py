@@ -1,7 +1,3 @@
-# Core market visualisations shared by all hypotheses.
-# Hypothesis-specific plotting functions live on their respective branches
-# (hypothesis-1/2/3), appended to this file.
-
 from AgentBasedModel.simulator import SimulatorInfo
 import AgentBasedModel.utils.math as math
 import matplotlib.pyplot as plt
@@ -104,3 +100,123 @@ def plot_liquidity(info: SimulatorInfo, rolling: int = 1, figsize=(6, 6)):
     plt.ylabel('Spread / avg. Price')
     plt.plot(info.liquidity(rolling), color='black')
 
+#my
+
+def plot_sentiment_imbalance(info: SimulatorInfo, rolling: int = 1, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Sentiment Imbalance') if rolling == 1 else plt.title(f'Sentiment Imbalance (MA {rolling})')
+    plt.xlabel('Iterations')
+    plt.ylabel('Order Parameter $m(t)$')
+    
+    m_t = []
+    for sent_dict in info.sentiments:
+        n_opt = sum(s == 'Optimistic' for s in sent_dict.values())
+        n_pes = sum(s == 'Pessimistic' for s in sent_dict.values())
+        n_tot = n_opt + n_pes
+        m_t.append(abs(n_opt - n_pes) / n_tot if n_tot > 0 else 0)
+
+    plt.plot(range(rolling - 1, len(m_t)), math.rolling(m_t, rolling), color='black')
+
+
+
+def plot_phase_transition(df: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Phase Transition: Sentiment Order vs $J$')
+    plt.xlabel('Interaction Parameter $J$')
+    plt.ylabel('Order Parameter $m_J$')
+    
+    data = df.groupby('J')['m_J'].mean().reset_index()
+    
+    plt.plot(data['J'], data['m_J'], 'o-', color='black', label='$m(J)$')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.show()
+
+
+
+def plot_volatility_sweep(df: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Volatility Jump vs $J$')
+    plt.xlabel('Interaction Parameter $J$')
+    plt.ylabel('Mean Return Volatility $vol_J$')
+    
+    data = df.groupby('J')['vol_J'].mean().reset_index()
+
+    plt.plot(data['J'], data['vol_J'], 's--', color='red', label='Volatility')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.show()
+
+
+def plot_returns_distribution(info: SimulatorInfo, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Returns Distribution (Log-scale)')
+    plt.xlabel('Return Value')
+    plt.ylabel('Log Density')
+    
+    prices = info.prices
+    returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+
+    plt.hist(returns, bins=50, density=True, color='black', alpha=0.7, log=True)
+
+
+def plot_fixed_spread_sweep(df: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Market Liquidity: Fixed Volume Spread vs $J$')
+    plt.xlabel('Interaction Parameter $J$')
+    plt.ylabel('Mean Spread (Qty 1000)')
+    
+    if not df.empty and 'fixed_spread_1000' in df.columns:
+        data = df.groupby('J')['fixed_spread_1000'].mean().reset_index()
+        plt.plot(data['J'], data['fixed_spread_1000'], 'D-', color='green', label='Spread (1000)')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+#FOR DIFF AGENTS
+
+
+def plot_phase_by_chartist(df_results: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Order parameter m(J) for different Chartist counts')
+    plt.xlabel('J')
+    plt.ylabel('m(J)')
+
+    agg = df_results.groupby(['J', 'Chartist'])['m_J'].mean().reset_index()
+    chart_levels = sorted(agg['Chartist'].unique())
+
+    for ch in chart_levels:
+        sub = agg[agg['Chartist'] == ch]
+        plt.plot(sub['J'], sub['m_J'], marker='o', label=f'Chartist = {ch}')
+
+    plt.legend()
+
+def plot_volatility_by_chartist(df_results: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Return volatility vol(J) for different Chartist counts')
+    plt.xlabel('J')
+    plt.ylabel('vol(J)')
+
+    agg = df_results.groupby(['J', 'Chartist'])['vol_J'].mean().reset_index()
+    chart_levels = sorted(agg['Chartist'].unique())
+
+    for ch in chart_levels:
+        sub = agg[agg['Chartist'] == ch]
+        plt.plot(sub['J'], sub['vol_J'], marker='o', label=f'Chartist = {ch}')
+
+    plt.legend()
+
+
+def plot_spread_by_chartist(df_results: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Fixed-volume spread for different Chartist counts')
+    plt.xlabel('J')
+    plt.ylabel('Spread for volume=1000')
+
+    agg = df_results.groupby(['J', 'Chartist'])['fixed_spread_1000'].mean().reset_index()
+    chart_levels = sorted(agg['Chartist'].unique())
+
+    for ch in chart_levels:
+        sub = agg[agg['Chartist'] == ch]
+        plt.plot(sub['J'], sub['fixed_spread_1000'], marker='o', label=f'Chartist = {ch}')
+
+    plt.legend()
