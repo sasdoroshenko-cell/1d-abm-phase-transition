@@ -1,11 +1,8 @@
-# Core market visualisations shared by all hypotheses.
-# Hypothesis-specific plotting functions live on their respective branches
-# (hypothesis-1/2/3), appended to this file.
-
 from AgentBasedModel.simulator import SimulatorInfo
 import AgentBasedModel.utils.math as math
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
 
 def plot_price(info: SimulatorInfo, spread=False, rolling: int = 1, figsize=(6, 6)):
@@ -104,3 +101,88 @@ def plot_liquidity(info: SimulatorInfo, rolling: int = 1, figsize=(6, 6)):
     plt.ylabel('Spread / avg. Price')
     plt.plot(info.liquidity(rolling), color='black')
 
+#my
+def plot_fixed_spread_sweep(df: pd.DataFrame, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Market Liquidity: Fixed Volume Spread vs $J$')
+    plt.xlabel('Interaction Parameter $J$')
+    plt.ylabel('Mean Spread (Qty 1000)')
+    
+    if not df.empty and 'fixed_spread_1000' in df.columns:
+        data = df.groupby('J')['fixed_spread_1000'].mean().reset_index()
+        plt.plot(data['J'], data['fixed_spread_1000'], 'D-', color='green', label='Spread (1000)')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+def plot_returns_distribution(info: SimulatorInfo, figsize=(6, 6)):
+    plt.figure(figsize=figsize)
+    plt.title('Returns Distribution (Log-scale)')
+    plt.xlabel('Return Value')
+    plt.ylabel('Log Density')
+    
+    prices = info.prices
+    returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+
+    plt.hist(returns, bins=50, density=True, color='black', alpha=0.7, log=True)
+
+
+def plot_abs_return_acf(info, max_lag=50, title_suffix=""):
+    returns = np.diff(info.prices) / info.prices[:-1]
+    if len(returns) < max_lag + 5:
+        return
+    r_eff = returns
+    r = np.abs(r_eff - r_eff.mean())
+    r = r - r.mean()
+    var = np.dot(r, r)
+    acf = []
+    for lag in range(max_lag + 1):
+        if lag == 0:
+            acf.append(1.0)
+        else:
+            c = np.dot(r[:-lag], r[lag:])
+            acf.append(c / var if var > 0 else 0.0)
+    acf = np.array(acf)
+
+    plt.figure(figsize=(6, 4))
+    plt.stem(range(max_lag + 1), acf, use_line_collection=True)
+    plt.xlabel('Lag')
+    plt.ylabel('ACF(|r_t|)')
+    plt.title(f'Volatility clustering: ACF(|r_t|) {title_suffix}')
+
+
+def plot_vol_cluster_metrics(df_results: pd.DataFrame):
+    plt.figure(figsize=(6, 4))
+    agg = df_results.groupby('J')['acf_abs_mean'].mean().reset_index()
+    plt.plot(agg['J'], agg['acf_abs_mean'], marker='o')
+    plt.xlabel('J')
+    plt.ylabel('Mean ACF(|r_t|) (lags 1..L)')
+    plt.title('Volatility clustering vs J')
+    plt.grid(True)
+
+    plt.figure(figsize=(6, 4))
+    agg2 = df_results.groupby('J')['cluster_len_avg'].mean().reset_index()
+    plt.plot(agg2['J'], agg2['cluster_len_avg'], marker='o', color='orange')
+    plt.xlabel('J')
+    plt.ylabel('Average high-vol cluster length')
+    plt.title('High-volatility cluster length vs J')
+    plt.grid(True)
+
+
+def plot_fixed_spread_vs_J(df_results: pd.DataFrame):
+    plt.figure(figsize=(6, 4))
+    agg = df_results.groupby('J')['fixed_spread_1000'].mean().reset_index()
+    plt.plot(agg['J'], agg['fixed_spread_1000'], marker='o')
+    plt.xlabel('J')
+    plt.ylabel('Fixed-volume spread (V=1000)')
+    plt.title('Fixed-volume spread vs J')
+    plt.grid(True)
+
+
+def plot_cluster_vs_spread(df_results: pd.DataFrame):
+    plt.figure(figsize=(6, 4))
+    plt.scatter(df_results['acf_abs_mean'], df_results['fixed_spread_1000'],
+                alpha=0.6)
+    plt.xlabel('Mean ACF(|r_t|)')
+    plt.ylabel('Fixed-volume spread (V=1000)')
+    plt.title('Volatility clustering vs liquidity cost')
+    plt.grid(True)
