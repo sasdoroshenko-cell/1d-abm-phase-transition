@@ -474,6 +474,154 @@ class Chartist(Trader):
 
         # print('sentiment', prob)
 
+class PanicChartist(Chartist):
+    """
+    Multi-state / panic chartist.
+
+    States:
+        - 'Optimistic': обычный бычий настрой
+        - 'Neutral'   : слабый сигнал, низкая активность
+        - 'Pessimistic': обычный медвежий настрой
+        - 'Panic'     : усиленная продажа (crash mode)
+
+    Переходы в сторону паники происходят быстрее, чем возврат к оптимизму.
+    В состоянии 'Panic' агент торгует большими объёмами рыночными ордерами.
+    """
+    def __init__(self, market: ExchangeAgent, cash: float or int, assets: int = 0, J: float = 0.0):
+        super().__init__(market, cash, assets, J=J)
+        # переопределяем type и начальное состояние
+        self.type = 'PanicChartist'
+        self.sentiment = random.choice(['Optimistic', 'Neutral', 'Pessimistic'])
+
+    def call(self):
+        """
+        Торговое поведение зависит от состояния:
+        - Optimistic: похож на обычного чартиста, но чуть более активен в покупке.
+        - Neutral: в основном выставляет мелкие лимитные ордера.
+        - Pessimistic: больше продажи.
+        - Panic: агрессивная продажа крупным объёмом по рынку.
+        """
+        spread = self.market.spread()
+        if spread is None:
+            return
+
+        t_cost = self.market.transaction_cost
+        r = random.random()
+
+        # базовый размер заявки
+        base_qty = Random.draw_quantity()
+
+        if self.sentiment == 'Optimistic':
+            if r > 0.85:
+                self._buy_market(base_qty)
+            elif r > 0.5:
+                self._buy_limit(base_qty, Random.draw_price('bid', spread) * (1 - t_cost))
+            elif r < 0.35 and self.orders:
+                self._cancel_order(self.orders[-1])
+
+        elif self.sentiment == 'Neutral':
+            # более пассивный режим
+            if r > 0.7:
+                self._buy_limit(max(1, base_qty // 2), Random.draw_price('bid', spread) * (1 - t_cost))
+            elif r > 0.4:
+                self._sell_limit(max(1, base_qty // 2), Random.draw_price('ask', spread) * (1 + t_cost))
+            elif r < 0.2 and self.orders:
+                self._cancel_order(self.orders[-1])
+
+        elif self.sentiment == 'Pessimistic':
+            if r > 0.85:
+                self._sell_market(base_qty)
+            elif r > 0.5:
+                self._sell_limit(base_qty, Random.draw_price('ask', spread) * (1 + t_cost))
+            elif r < 0.35 and self.orders:
+                self._cancel_order(self.orders[-1])
+
+        elif self.sentiment == 'Panic':
+            # паника: агрессивная продажа крупным объёмом по рынку
+            panic_qty = base_qty * 3
+            if self.assets > 0:
+                self._sell_market(min(panic_qty, self.assets))
+            # в панике почти не ставим лимитки, только иногда отменяем старые
+            if r < 0.2 and self.orders:
+                self._cancel_order(self.orders[-1])
+
+    def change_sentiment(self, info, a1=1, a2=1, v1=.1,
+                         panic_bias=2.0, relax_bias=0.5):
+        """
+        Обновление многосоставного настроения.
+
+        panic_bias > 1  усиливает переходы в сторону 'Pessimistic'/'Panic';
+        relax_bias < 1  замедляет выход из 'Panic' обратно в оптимизм.
+        """
+        n_traders = len(info.traders)
+
+        last_types = info.types[-1]
+        last_sents = info.sentiments[-1]
+
+        n_chartists = sum(tr_type in ['Chartist', 'PanicChartist']
+                          for tr_type in last_types.values())
+        n_optimistic = sum(s == 'Optimistic' for s in last_sents.values())
+        n_pessimists = sum(s == 'Pessimistic' for s in last_sents.values())
+
+        dp = info.prices[-1] - info.prices[-2] if len(info.prices) > 1 else 0.0
+        p = self.market.price() or 1.0
+
+        x = (n_optimistic - n_pessimists) / n_chartists if n_chartists > 0 else 0.0
+
+        # локальное поле, как у обычного чартиста
+        local = 0.0
+        for nb in self.neighbors:
+            s = getattr(nb, "sentiment", None)
+            if s == 'Optimistic':
+                local += 1.0
+            elif s == 'Pessimistic' or s == 'Panic':
+                local -= 1.0
+        if self.neighbors:
+            local /= len(self.neighbors)
+
+        U = a1 * x + a2 * v1 * dp / p + self.J * local
+
+        # базовая интенсивность обновления
+        lam = v1 * (n_chartists / n_traders if n_traders > 0 else 0.0)
+        if lam <= 0:
+            return
+
+        r = random.random()
+
+        # Правило переходов по уровням:
+        if self.sentiment == 'Optimistic':
+            # в нейтраль / пессимизм быстрее, если U < 0
+            prob_down = lam * panic_bias * exp(-U)
+            if r < prob_down:
+                self.sentiment = 'Neutral'
+
+        elif self.sentiment == 'Neutral':
+            if U > 0:
+                # немного вверх
+                prob_up = lam * exp(U)
+                if r < prob_up:
+                    self.sentiment = 'Optimistic'
+            else:
+                # вниз быстрее
+                prob_down = lam * panic_bias * exp(-U)
+                if r < prob_down:
+                    self.sentiment = 'Pessimistic'
+
+        elif self.sentiment == 'Pessimistic':
+            # шанс уйти в панику, если поле сильно негативное
+            prob_panic = lam * panic_bias * exp(-U)
+            prob_up = lam * exp(U)  # возврат к Neutral/Optimistic
+            if r < prob_panic:
+                self.sentiment = 'Panic'
+            elif r < prob_panic + prob_up:
+                self.sentiment = 'Neutral'
+
+        elif self.sentiment == 'Panic':
+            # выход из паники заторможен (relax_bias < 1)
+            prob_relax = lam * relax_bias * exp(U)
+            if r < prob_relax:
+                self.sentiment = 'Pessimistic'
+
 
 class Universalist(Fundamentalist, Chartist):
     """
